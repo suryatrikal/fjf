@@ -1,14 +1,141 @@
-Hi Jasmin Ma'am,
+ @Service
+public class CustomUserDetailService implements UserDetailsService {
+    @Autowired
+    private  jpaRepo jRepo;
 
-I hope this message finds you well.
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = jRepo.findByUsername(username);
+        if (user == null) throw new UsernameNotFoundException("Invalid Username");
 
-My name is Suryakant Tiwari, and I recently completed my B.Tech from NIT Bhopal. I am from Rewa, Madhya Pradesh.
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        return new org.springframework.security.core.userdetails.User(user.getUsername(), user.getPassword(), authorities);
+    }
+}
 
-I am pleased to inform you that I have been assigned to the PTA-Cash - TPRGaugeApp project, which is under your supervision. I wanted to introduce myself and let you know that I am one of the new graduates joining your project.
 
-Additionally, I received a communication indicating that I should reach out to you for details regarding the work-from-home and office policies.
 
-Looking forward to working with you.
 
-Best regards,
-Suryakant Tiwari
+@Component
+public class JwtProvider {
+    private final SecretKey key = Keys.hmacShaKeyFor("12398348949asbjdjkfnbv0!@#$%^&*()".getBytes());
+
+    public String generateJwtToken(Authentication authentication) {
+        List<String> authorities = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toList());
+
+        return Jwts.builder()
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10)) // 10 hours
+                .claim("username", authentication.getName())
+                .claim("authorities", authorities)
+                .signWith(key)
+                .compact();
+    }
+
+    public String getUserNameFromToken(String jwt) {
+        jwt = jwt.substring(7);
+        Claims claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(jwt).getBody();
+        return claims.getSubject();
+    }
+}
+
+
+
+@Component
+public class JwtValidator extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        String jwt = request.getHeader("Authorization");
+
+        if (jwt != null && jwt.startsWith("Bearer ")) {
+        System.out.println("hi guys"+jwt);
+
+            jwt = jwt.substring(7);
+            try {
+                SecretKey key = Keys.hmacShaKeyFor("12398348949asbjdjkfnbv0!@#$%^&*()".getBytes());
+                Claims claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(jwt).getBody();
+
+                String username = claims.get("username", String.class);
+                System.out.println("claims"+claims);
+                List<GrantedAuthority> authorities = AuthorityUtils.commaSeparatedStringToAuthorityList(claims.get("authorities").toString());
+
+                Authentication authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            } catch (Exception e) {
+                throw new BadCredentialsException(jwt + " is not a valid token");
+            }
+        }
+
+        filterChain.doFilter(request, response);
+    }
+}
+
+
+package com.springsecurity.jwt.jwt;
+
+import static org.springframework.security.config.Customizer.withDefaults;
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+@EnableWebSecurity
+@Configuration
+public class AppConfig {
+    @Autowired
+    private JwtValidator jwtValidator;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .sessionManagement(sessionManagement -> 
+                sessionManagement.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+
+            .authorizeHttpRequests(authorizeRequests -> 
+                authorizeRequests
+                    .requestMatchers("/api/**").authenticated()
+                    .anyRequest().permitAll()
+            )
+            .csrf(csrf -> csrf.disable())
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .httpBasic(withDefaults())
+            .formLogin(withDefaults());
+
+        http.addFilterBefore(jwtValidator, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    private CorsConfigurationSource corsConfigurationSource() {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        CorsConfiguration cors = new CorsConfiguration();
+        cors.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:8080"));
+        cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+        cors.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type"));
+        cors.setExposedHeaders(List.of("Authorization", "Cache-Control", "Content-Type"));
+        cors.setAllowCredentials(true);
+        cors.setMaxAge(3600L);
+        source.registerCorsConfiguration("/**", cors);
+        return source;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}

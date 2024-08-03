@@ -139,3 +139,6 @@ public class AppConfig {
         return new BCryptPasswordEncoder();
     }
 }
+
+
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
